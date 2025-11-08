@@ -18,13 +18,13 @@ if DATABASE_URL:
         
         # Проверяем подключение и создаем таблицу
         with engine.connect() as conn:
-            conn.execute(text("""
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS messages (
                     id SERIAL PRIMARY KEY,
                     content TEXT NOT NULL,
                     created_at TIMESTAMP DEFAULT NOW()
                 )
-            """))
+            """)
             conn.commit()
         
         db_connected = True
@@ -53,8 +53,8 @@ def save_message():
         
         with engine.connect() as conn:
             conn.execute(
-                text("INSERT INTO messages (content) VALUES (:content)"),
-                {"content": message}
+                "INSERT INTO messages (content) VALUES (%s)",
+                message
             )
             conn.commit()
         
@@ -71,7 +71,7 @@ def get_messages():
     try:
         with engine.connect() as conn:
             result = conn.execute(
-                text("SELECT id, content, created_at FROM messages ORDER BY id DESC LIMIT 10")
+                "SELECT id, content, created_at FROM messages ORDER BY id DESC LIMIT 10"
             )
             rows = result.fetchall()
         
@@ -93,7 +93,7 @@ def get_messages():
 def health_check():
     return jsonify({
         "status": "ok", 
-        "db_connected": db_connected if 'db_connected' in locals() else False
+        "db_connected": db_connected
     })
 
 @app.route('/test-db')
@@ -103,7 +103,7 @@ def test_db():
     
     try:
         with engine.connect() as conn:
-            result = conn.execute(text("SELECT 1"))
+            result = conn.execute("SELECT 1")
             test_result = result.scalar()
         
         return jsonify({"database_test": "success", "result": test_result})
