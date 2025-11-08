@@ -1,25 +1,16 @@
 from flask import Flask, request, jsonify
-import psycopg2
+import psycopg
 import os
-from datetime import datetime
 
 app = Flask(__name__)
 
-# Функция для подключения к БД
-def get_db_connection():
-    try:
-        DATABASE_URL = os.environ.get('DATABASE_URL')
-        if not DATABASE_URL:
-            print("❌ DATABASE_URL not found")
-            return None
-        
-        # Для Render PostgreSQL
-        conn = psycopg2.connect(DATABASE_URL, sslmode='require')
-        print("✅ Database connected successfully")
-        return conn
-    except Exception as e:
-        print(f"❌ Database connection error: {e}")
-        return None
+# Подключение к БД
+DATABASE_URL = os.environ.get('DATABASE_URL')
+if DATABASE_URL:
+    conn = psycopg.connect(DATABASE_URL)
+else:
+    conn = None
+
 
 # Функция для инициализации БД
 def init_db():
