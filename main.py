@@ -1,16 +1,25 @@
 from flask import Flask, request, jsonify
 import psycopg
 import os
+from datetime import datetime
 
 app = Flask(__name__)
 
-# Подключение к БД
-DATABASE_URL = os.environ.get('DATABASE_URL')
-if DATABASE_URL:
-    conn = psycopg.connect(DATABASE_URL)
-else:
-    conn = None
-
+# Функция для подключения к БД
+def get_db_connection():
+    try:
+        DATABASE_URL = os.environ.get('DATABASE_URL')
+        if not DATABASE_URL:
+            print("❌ DATABASE_URL not found")
+            return None
+        
+        # Для Render PostgreSQL
+        conn = psycopg.connect(DATABASE_URL)
+        print("✅ Database connected successfully")
+        return conn
+    except Exception as e:
+        print(f"❌ Database connection error: {e}")
+        return None
 
 # Функция для инициализации БД
 def init_db():
@@ -19,16 +28,15 @@ def init_db():
         return False
         
     try:
-        cur = conn.cursor()
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS messages (
-                id SERIAL PRIMARY KEY,
-                content TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT NOW()
-            )
-        """)
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS messages (
+                    id SERIAL PRIMARY KEY,
+                    content TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT NOW()
+                )
+            """)
         conn.commit()
-        cur.close()
         conn.close()
         print("✅ Database table created successfully")
         return True
@@ -74,10 +82,9 @@ def save_message():
         if not message:
             return jsonify({"error": "Message is empty"}), 400
         
-        cur = conn.cursor()
-        cur.execute("INSERT INTO messages (content) VALUES (%s)", (message,))
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO messages (content) VALUES (%s)", (message,))
         conn.commit()
-        cur.close()
         conn.close()
         
         return jsonify({
@@ -98,15 +105,14 @@ def get_messages():
         return jsonify({"error": "Database not connected"}), 500
 
     try:
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT id, content, created_at 
-            FROM messages 
-            ORDER BY created_at DESC 
-            LIMIT 10
-        """)
-        rows = cur.fetchall()
-        cur.close()
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, content, created_at 
+                FROM messages 
+                ORDER BY created_at DESC 
+                LIMIT 10
+            """)
+            rows = cur.fetchall()
         conn.close()
         
         messages = [
@@ -136,25 +142,23 @@ def test_db():
         return jsonify({"error": "Database not connected"}), 500
     
     try:
-        cur = conn.cursor()
+        with conn.cursor() as cur:
+            # Тест 1: Проверка версии PostgreSQL
+            cur.execute("SELECT version()")
+            version = cur.fetchone()[0]
+            
+            # Тест 2: Проверка таблицы
+            cur.execute("""
+                SELECT COUNT(*) 
+                FROM information_schema.tables 
+                WHERE table_name = 'messages'
+            """)
+            table_exists = cur.fetchone()[0] > 0
+            
+            # Тест 3: Количество сообщений
+            cur.execute("SELECT COUNT(*) FROM messages")
+            message_count = cur.fetchone()[0]
         
-        # Тест 1: Проверка версии PostgreSQL
-        cur.execute("SELECT version()")
-        version = cur.fetchone()[0]
-        
-        # Тест 2: Проверка таблицы
-        cur.execute("""
-            SELECT COUNT(*) 
-            FROM information_schema.tables 
-            WHERE table_name = 'messages'
-        """)
-        table_exists = cur.fetchone()[0] > 0
-        
-        # Тест 3: Количество сообщений
-        cur.execute("SELECT COUNT(*) FROM messages")
-        message_count = cur.fetchone()[0]
-        
-        cur.close()
         conn.close()
         
         return jsonify({
@@ -176,10 +180,9 @@ def clear_messages():
         return jsonify({"error": "Database not connected"}), 500
 
     try:
-        cur = conn.cursor()
-        cur.execute("DELETE FROM messages")
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM messages")
         conn.commit()
-        cur.close()
         conn.close()
         
         return jsonify({"status": "cleared", "message": "All messages deleted"})
