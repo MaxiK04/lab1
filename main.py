@@ -5,42 +5,68 @@ from datetime import datetime
 
 app = Flask(__name__)
 
-# Подключение к БД
-DATABASE_URL = os.environ.get('DATABASE_URL')
-
+# Функция для подключения к БД
 def get_db_connection():
     try:
+        DATABASE_URL = os.environ.get('DATABASE_URL')
+        if not DATABASE_URL:
+            print("❌ DATABASE_URL not found")
+            return None
+        
+        # Для Render PostgreSQL
         conn = psycopg2.connect(DATABASE_URL, sslmode='require')
+        print("✅ Database connected successfully")
         return conn
     except Exception as e:
-        print(f"Database connection error: {e}")
+        print(f"❌ Database connection error: {e}")
         return None
 
-# Инициализация БД при старте
+# Функция для инициализации БД
 def init_db():
     conn = get_db_connection()
-    if conn:
-        try:
-            cur = conn.cursor()
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS messages (
-                    id SERIAL PRIMARY KEY,
-                    content TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT NOW()
-                )
-            """)
-            conn.commit()
-            cur.close()
+    if not conn:
+        return False
+        
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS messages (
+                id SERIAL PRIMARY KEY,
+                content TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        conn.commit()
+        cur.close()
+        conn.close()
+        print("✅ Database table created successfully")
+        return True
+    except Exception as e:
+        print(f"❌ Database initialization error: {e}")
+        if conn:
             conn.close()
-            print("✅ Database initialized successfully")
-            return True
-        except Exception as e:
-            print(f"❌ Database initialization failed: {e}")
-            return False
-    return False
+        return False
 
-# Инициализируем БД при импорте
+# Инициализируем БД при старте приложения
+print("🚀 Starting application...")
 db_initialized = init_db()
+
+@app.route('/')
+def health_check():
+    conn = get_db_connection()
+    if conn:
+        conn.close()
+        return jsonify({
+            "status": "ok", 
+            "db_connected": True,
+            "db_initialized": db_initialized
+        })
+    else:
+        return jsonify({
+            "status": "ok", 
+            "db_connected": False,
+            "db_initialized": False
+        })
 
 @app.route('/save', methods=['POST'])
 def save_message():
@@ -53,7 +79,9 @@ def save_message():
         if not data:
             return jsonify({"error": "No JSON data"}), 400
             
-        message = data.get('message', '')
+        message = data.get('message', '').strip()
+        if not message:
+            return jsonify({"error": "Message is empty"}), 400
         
         cur = conn.cursor()
         cur.execute("INSERT INTO messages (content) VALUES (%s)", (message,))
@@ -61,7 +89,11 @@ def save_message():
         cur.close()
         conn.close()
         
-        return jsonify({"status": "saved", "message": message})
+        return jsonify({
+            "status": "saved", 
+            "message": message,
+            "timestamp": datetime.now().isoformat()
+        })
         
     except Exception as e:
         if conn:
@@ -76,7 +108,12 @@ def get_messages():
 
     try:
         cur = conn.cursor()
-        cur.execute("SELECT id, content, created_at FROM messages ORDER BY id DESC LIMIT 10")
+        cur.execute("""
+            SELECT id, content, created_at 
+            FROM messages 
+            ORDER BY created_at DESC 
+            LIMIT 10
+        """)
         rows = cur.fetchall()
         cur.close()
         conn.close()
@@ -90,25 +127,16 @@ def get_messages():
             for row in rows
         ]
         
-        return jsonify(messages)
+        return jsonify({
+            "status": "success",
+            "count": len(messages),
+            "messages": messages
+        })
         
     except Exception as e:
         if conn:
             conn.close()
         return jsonify({"error": str(e)}), 500
-
-@app.route('/')
-def health_check():
-    conn = get_db_connection()
-    db_connected = conn is not None
-    if conn:
-        conn.close()
-    
-    return jsonify({
-        "status": "ok", 
-        "db_connected": db_connected,
-        "db_initialized": db_initialized
-    })
 
 @app.route('/test-db')
 def test_db():
@@ -118,19 +146,57 @@ def test_db():
     
     try:
         cur = conn.cursor()
+        
+        # Тест 1: Проверка версии PostgreSQL
         cur.execute("SELECT version()")
-        db_version = cur.fetchone()[0]
+        version = cur.fetchone()[0]
+        
+        # Тест 2: Проверка таблицы
+        cur.execute("""
+            SELECT COUNT(*) 
+            FROM information_schema.tables 
+            WHERE table_name = 'messages'
+        """)
+        table_exists = cur.fetchone()[0] > 0
+        
+        # Тест 3: Количество сообщений
+        cur.execute("SELECT COUNT(*) FROM messages")
+        message_count = cur.fetchone()[0]
+        
         cur.close()
         conn.close()
         
         return jsonify({
-            "database_test": "success", 
-            "postgres_version": db_version
+            "status": "success",
+            "postgres_version": version,
+            "table_exists": table_exists,
+            "message_count": message_count
         })
+        
     except Exception as e:
         if conn:
             conn.close()
-        return jsonify({"database_test": "failed", "error": str(e)}), 500
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/clear', methods=['POST'])
+def clear_messages():
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({"error": "Database not connected"}), 500
+
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM messages")
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        return jsonify({"status": "cleared", "message": "All messages deleted"})
+        
+    except Exception as e:
+        if conn:
+            conn.close()
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=5000, debug=False)
