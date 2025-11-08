@@ -1,21 +1,26 @@
 from flask import Flask, request, jsonify
-import psycopg2
+import pg8000
 import os
-from urllib.parse import urlparse
 
 app = Flask(__name__)
 
 # Подключение к БД
 DATABASE_URL = os.environ.get('DATABASE_URL')
 if DATABASE_URL:
-    url = urlparse(DATABASE_URL)
-    conn = psycopg2.connect(
-        database=url.path[1:],
-        user=url.username,
-        password=url.password,
-        host=url.hostname,
-        port=url.port
-    )
+    # Парсим DATABASE_URL вручную
+    import re
+    match = re.match(r'postgres://([^:]+):([^@]+)@([^:]+):(\d+)/(.+)', DATABASE_URL)
+    if match:
+        user, password, host, port, database = match.groups()
+        conn = pg8000.connect(
+            user=user,
+            password=password,
+            host=host,
+            port=int(port),
+            database=database
+        )
+    else:
+        conn = None
 else:
     conn = None
 
@@ -29,7 +34,7 @@ if conn:
                 created_at TIMESTAMP DEFAULT NOW()
             )
         """)
-        conn.commit()
+    conn.commit()
 
 @app.route('/save', methods=['POST'])
 def save_message():
@@ -41,7 +46,7 @@ def save_message():
 
     with conn.cursor() as cur:
         cur.execute("INSERT INTO messages (content) VALUES (%s)", (message,))
-        conn.commit()
+    conn.commit()
 
     return jsonify({"status": "saved", "message": message})
 
@@ -56,3 +61,10 @@ def get_messages():
 
     messages = [{"id": r[0], "text": r[1], "time": r[2].isoformat()} for r in rows]
     return jsonify(messages)
+
+@app.route('/')
+def health_check():
+    return jsonify({"status": "ok", "db_connected": conn is not None})
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
